@@ -1,0 +1,334 @@
+---
+title: "Network Analysis - I assignment"
+author: "Marco Boso"
+date: "2025-04-14"
+output: html_document
+---
+
+## Topic
+
+For this project, I decided to use the data from the Copenhagen Networks Study, a research project by Piotr Sapiezynski, Arkadiusz Stopczynski, David Dreyer Lassen, and Sune Lehman. The dataset includes interaction data from more than 700 university students from the Technical University of Denmark (located in Copenhagen). It contains different types of networks, such as physical proximity, phone calls, text messages, and Facebook friendships; all the data was recorded through special smartphones and it was collected over the course of four weeks.
+
+I have decided to focus my analysis only on the text message network (sms). The dataset shows who texted whom and when, but without the actual message content for privacy reason.
+
+## Libraries
+
+```{r}
+library(igraph)
+library(readr)
+library(ggplot2)
+library(ggraph)
+library(tidygraph)
+```
+
+## The Network
+
+Let's start importing the csv files with the nodes and the edges from the main research, and let's combine them in a igraph to create a proper network.
+
+```{r}
+edges <- read.csv('edges.csv')
+nodes <- read.csv('nodes.csv')
+
+head(nodes)
+```
+
+```{r}
+head(edges)
+```
+
+```{r}
+sms <- graph_from_data_frame(edges, vertices=nodes)
+sms
+```
+
+The network that we are working on is Directed (D) and Unipartite (U), this means that the connections between nodes have a direction (Directed) and that all the nodes in the network are of the same type (Unipartite). We can also plot the network in order to have a first impression of what we will work on
+
+```{r}
+plot(sms,
+     vertex.size = 4,            
+     vertex.label = NA,          
+     edge.arrow.size = 0.2,      
+     edge.width = 0.2,           
+     main = "SMS network")
+```
+
+From this plot, we can highlight two main areas of the network. The central area contains the majority of the links and represents a core group of students who communicated frequently with one another. In contrast, the peripheral area is made up of nodes with fewer connections, indicating students who were more isolated or only communicated occasionally. The presence of many short, individual links suggests that some students only exchanged messages with one or two others.
+
+## 1. What is the number of nodes and links?
+
+```{r}
+mean <- vcount(sms)
+cat("N. of nodes:", mean, "\n")
+
+links <- ecount(sms)
+cat("N. of links:", links, "\n")
+```
+
+## 2. What is the average degree in the network? And the standard deviation of the degree?
+
+```{r}
+degree <- degree(sms, mode = "all")
+
+mean <- mean(degree)
+cat("Mean:", mean, "\n")
+
+sd <- sd(degree)
+cat("Standard deviation:", sd, "\n")
+```
+
+I observed a difference between the average degree I calculated and the one reported on the Netzschleuder webpage. In my analysis, I obtained an average degree of 85.68, while Netzschleuder reports a value of 42.84. This discrepancy could be explained due to the fact that I computed the total degree (sum of in-degree and out-degree) in a directed network, whereas in the summary that is present in the Netzschleuder webpage only could reports only the in-degree.
+
+## 3. Plot the degree distribution in linear-linear scale and in log-log-scale. Does it have a typical connectivity? What is the degree of the most connected node?
+
+```{r}
+ggplot() +
+geom_histogram(aes(x = degree(sms, mode = "all")), binwidth = 10) +
+labs(x = "Degree", y = "Density") +
+theme_minimal()
+```
+
+```{r}
+ggplot() +
+geom_histogram(aes(x = log10(degree(sms, mode = "all"))), binwidth = 1) +
+labs(x = "Log10 of Degree", y = "Density") +
+theme_minimal()
+```
+
+```{r}
+cat("Most connected node:", names(degree)[which.max(degree)], "\n")
+
+cat("Degree of the most connected node:", max(degree(sms,mode="all")), "\n")
+```
+
+In the linear-linear histogram, the distribution is extremely skewed: the majority of nodes have very low degree values, while a small number of nodes have extremely high degrees. This pattern is typical of heterogeneous networks, where a few individuals serve as hubs while most have only a few connections. When plotted on a log-log scale, the degree distribution reveals a heavy-tailed shape, which suggests the presence of a power-law-like distribution. This means that the network exhibits scale-free properties, where most nodes are weakly connected, but a small number play a central role in maintaining connectivity across the network. I can say that the network, in general, doesn't show a typical connectivity; it follows a non-uniform distribution with a very high standard deviation and a small number of high-degree hubs.
+
+## 4. What is the clustering coefficient (transitivity) in the network?
+
+```{r}
+t_global <- transitivity(sms, type = "global")
+
+cat("Transitivity:", t_global, "\n")
+```
+
+```{r}
+t_local <- transitivity(sms, type = "local")
+
+t_avg <- mean(t_local, na.rm = TRUE)
+t_avg
+```
+
+In this network the global transitivity, which represents the overall probability that two nodes connected to the same node are also connected to each other, has a value of 0.15, meaning that only about 15% of all possible triangles in the network actually exist. Meanwhile, the average local clustering coefficient, or the mean of each node’s individual clustering coefficient excluding undefined values, is 0.22, indicating that roughly 22% of a person’s contacts are also connected with one another. These results tell us that the network has some local structure, where small groups of students tend to communicate within their own circles. But overall, the network is not very tightly connected. That makes sense for a network like this one, where people often message a few close friends and not everyone communicates with everyone else.
+
+## 5. What is the assortativity (degree) in the network?
+
+```{r}
+degree <- assortativity_degree(sms, directed = TRUE)
+
+cat("Assortativity:", degree, "\n")
+```
+The assortativity degree of the sms network has a value of 0.87, a pretty high results, very closed to 1. This means that the network has a high level of assortitivity, meaning that people who send or receive a lot of messages tend to connect with others who also send or receive a lot, and those with fewer connections tend to message other users that are more similar to them.
+
+## 6. Using the Louvain method, does the network have a community structure? If so, what is its modularity?
+
+```{r}
+sms_undirected <- as_undirected(sms, mode = "collapse")
+
+louvain <- cluster_louvain(sms_undirected)
+
+n_communities <- length(sizes(louvain))
+cat("N. of communities:", n_communities, "\n")
+
+mod_louv <- modularity(louvain)
+cat("Modularity with the Louvain methods:", mod_louv, "\n")
+
+ll <- layout_with_kk(sms_undirected)
+plot(louvain, sms_undirected, 
+     layout=ll, 
+     vertex.label=NA, 
+     main = "Community Structure - Louvain method")
+```
+
+```{r}
+deg_vals <- degree(sms_undirected, mode = "all")
+
+threshold <- quantile(deg_vals, 0.90)  
+top_nodes <- V(sms_undirected)[deg_vals >= threshold]
+
+subgraph_top <- induced_subgraph(sms_undirected, vids = top_nodes)
+
+louvain_sub <- cluster_louvain(subgraph_top)
+
+layout_sub <- layout_with_kk(subgraph_top)
+
+groups <- communities(louvain_sub)
+
+plot(subgraph_top,
+     layout = layout_sub,
+     vertex.color = membership(louvain_sub),
+     vertex.label = NA,
+     vertex.size = 6,
+     edge.arrow.size = 0.3,
+     mark.groups = groups,
+     mark.col = rgb(0.8, 0.8, 0.8, 0.3),  # light gray with transparency
+     main = "Community Structure - Louvain\n(Top 10% most connected nodes by degree)")
+
+```
+
+```{r}
+layout <- layout_with_fr(sms_undirected)
+layout <- as.matrix(layout) 
+
+plot(sms_undirected,
+     layout = layout,
+     vertex.color = membership(louvain),
+     vertex.label = NA,
+     vertex.size = 5,
+     edge.arrow.size = 0.3,
+     main = "Community Structure - Louvain method")
+```
+In order to apply the Louvain method I had to, at first, convert the sms network and trasform it in a undirected network in order to apply this method; I have done this because the Louvain method only work on weighted and undirected network. 
+The result that i have obtained was that in the network there are 63 communities, meaning that there is a strong internal structure with in general small groups of few people. The modularity score is 0.83 which is very high means that in this network the division in communities is very clear and meaningful, basically students from this school tend to form very close groups and tent to communicate only with the members of their group. 
+We can see it better in the two plots that I have created, in both of them we can see that the groups are very small with just a very few percentage of students that talk to other students that are not part of their original group, and we have other that tend to have more "relationship" with many other peoples from their school. 
+
+```{r}
+eb <- cluster_edge_betweenness(sms) 
+
+n_communities <- length(sizes(eb))
+cat("N. of communities:", n_communities, "\n")
+
+mod_eb <- modularity(eb)
+cat("Modularity with the Edge Betweenness methods:", mod_eb, "\n")
+
+mm <- layout_with_kk(sms)
+plot(eb, sms, 
+     layout= mm, 
+     vertex.label= NA,
+     main = "Community Structure - Edge Betweenness method")
+```
+```{r}
+deg_vals <- degree(sms, mode = "all")
+
+threshold <- quantile(deg_vals, 0.90)  
+top_nodes <- V(sms)[deg_vals >= threshold]
+
+subgraph_top <- induced_subgraph(sms, vids = top_nodes)
+
+edge_betweenness_sub <- cluster_edge_betweenness(subgraph_top)
+
+layout_sub <- layout_with_kk(subgraph_top)
+
+groups <- communities(edge_betweenness_sub)
+
+plot(subgraph_top,
+     layout = layout_sub,
+     vertex.color = membership(edge_betweenness_sub),
+     vertex.label = NA,
+     vertex.size = 6,
+     edge.arrow.size = 0.3,
+     mark.groups = groups,
+     mark.col = rgb(0.8, 0.8, 0.8, 0.3),  # light gray with transparency
+     main = "Community Structure - Edge Betweenness\n(Top 10% most connected nodes by degree)")
+```
+
+Since I have a directed and weighed network I wanted to try to use another method to learn a little bit more about the communities inside the network itself, so i tried to use the Edge Betweenness method. The results that i have obtained was a modularity of 0.90 even higher that the one that I have obtain with the Louvain method showing a even higher division in communities. 
+
+```{r}
+community_sizes <- sizes(louvain)
+
+df_comm <- data.frame(
+  Community = factor(names(community_sizes)),
+  Members = as.vector(community_sizes)
+)
+
+ggplot(df_comm, aes(x = Community, y = Members)) +
+  geom_col(fill = "pink") +
+  labs(title = "Community Sizes - Louvain Method",
+       x = "Community ID",
+       y = "Number of Members") +
+  theme_minimal()
+```
+
+```{r}
+community_sizes <- sizes(eb)
+
+df_comm <- data.frame(
+  Community = factor(names(community_sizes)),
+  Members = as.vector(community_sizes)
+)
+
+ggplot(df_comm, aes(x = Community, y = Members)) +
+  geom_col(fill = "darkgreen") +
+  labs(title = "Community Sizes - Edge Betweenness Method",
+       x = "Community ID",
+       y = "Number of Members") +
+  theme_minimal()
+```
+
+What is interesting is that the two methods are giving two very different numbers of communities, the Louvain methods create 65 communities, on the other hands Edge Betweenness create about 156 communities; even the number of members of the communitie, in Louvain the max number of members in all the communities is more than 40 (and there are other communities that have some similar composition, numerically speaking), applying the Edge Betweenness method we obtain, as said before many more communities, but we have one community that is way larger than all the others, this one contain less than 60 members; the second bigger community that we can find has less than 20 members (way smaller than the first one).
+
+## 7. Test that the clustering coefficient in the network cannot be statistically explain by a configuration model in which the nodes have the same degree distribution as the original.
+
+```{r}
+trans_original <- transitivity(sms)
+
+trans_config <- transitivity(sample_degseq(degree(sms, mode = "all")))
+
+cat("Original network transitivity:", trans_original, "\n")
+cat("Configuration model transitivity:", trans_config, "\n")
+```
+
+```{r}
+set.seed(123)
+sms_ds <- sample_degseq(degree(sms))
+require(patchwork)
+
+sms1 <- ggraph(sms_ds,layout="kk")+geom_edge_link()+geom_node_point()+theme_void()+labs(title="Degree Seq.")
+sms1
+
+```
+
+```{r}
+n_sim <- 1000
+trans_config <- numeric(n_sim)
+
+for (i in 1:n_sim) {
+  trans_config[i] <- transitivity(sample_degseq(degree(sms, mode = "all")))
+}
+
+hist(trans_config,
+     breaks = 20,
+     col = "lightblue",
+     main = "Transitivity Distribution (Configuration Model)",
+     xlab = "Transitivity",
+     xlim = range(c(trans_config, trans_original)))
+abline(v = trans_original, col = "red", lwd = 2)
+legend("topright", legend = "Empirical value", col = "red", lwd = 2)
+
+t_test_result <- t.test(trans_config, mu = t_global)
+print(t_test_result)
+```
+
+In order to test whether the clustering coefficient observed in my network could simply be explained by the degree distribution of the nodes, I first calculated the transitivity of the real network, which was approximately 0.1539 meaning that there are only about 15 out of every 100 possible “triangles” between different persons in this network. Then, I generated 1,000 random networks with the same degree distribution and computed their transitivity values. The average transitivity of these randomized networks was around 0.2874, noticeably higher than that of the original network. To try to compare statistically the two, I have performed a one-sample t-test, which returned a p-value lower than 2.2e-16; this result is highly significant and indicates that the clustering observed in the real network is not likely to occur just by chance if connections were formed randomly while preserving degree. 
+
+
+## 8. Visualize the neighborhood of the node with the largest centrality (closeness)
+
+```{r}
+closeness_vals <- closeness(sms, mode = "all")
+
+max_node_id <- which.max(closeness_vals)
+max_node_name <- V(sms)$name[max_node_id]
+cat("Node with highest closeness:", max_node_name, "\n")
+
+ego_graph <- make_ego_graph(sms, order = 1, nodes = max_node_id, mode = "all")[[1]]
+
+plot(ego_graph,
+     vertex.label = V(ego_graph)$name,
+     vertex.size = 5,
+     edge.arrow.size = 0.3,
+     main = paste("Neighborhood of Node with Highest Closeness:", max_node_name))
+
+```
+
+
+
